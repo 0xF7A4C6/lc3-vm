@@ -5,8 +5,8 @@ type register struct {
 	pc uint16
 
 	// condition flags
-	r_cond  byte
-	r_count byte
+	r_cond  uint16
+	r_count uint16
 
-	general [8]uint32
+	general [8]uint16
 }
