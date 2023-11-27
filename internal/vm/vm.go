@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
@@ -20,27 +19,28 @@ func NewVM() *Vm {
 }
 
 func (vm *Vm) LoadRom(filePath string) error {
-	content, err := ioutil.ReadFile(filePath)
+	fileContent, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
 
-	baseAddr := binary.LittleEndian.Uint16(content[:2])
-	log.Printf("Loading ROM base addr: %v\n", baseAddr)
+	content := fileContent[2:]
 
-	if len(content) > len(vm.memory)-int(baseAddr) {
-		return fmt.Errorf("not enough space in memory to load ROM")
+	var origin uint16
+	origin = binary.BigEndian.Uint16(fileContent[:2])
+
+	log.Printf("Origin memory location: 0x%04X", origin)
+	vm.register.pc = origin
+
+	for count := 0; count < len(content); count += 2 {
+		value := binary.BigEndian.Uint16(content[count : count+2])
+
+		vm.memory[vm.register.pc] = value
+		vm.register.pc++
 	}
-
-	var uint16Slice []uint16
-	if err := binary.Read(bytes.NewReader(content[2:]), binary.BigEndian, &uint16Slice); err != nil {
-		return err
-	}
-
-	copy(vm.memory[baseAddr:], uint16Slice)
-	vm.register.pc = baseAddr
 
 	return nil
+
 }
 
 func (vm *Vm) getByte() uint16 {
@@ -78,6 +78,8 @@ func (vm *Vm) Run() {
 			panic(fmt.Sprintf("bad opcode '%d' at _pc %d", op, vm.register.pc))
 		case OP_RES:
 			panic(fmt.Sprintf("OP_RES at _pc %d", vm.register.pc))
+		case OP_TRAP:
+			vm.execTrap(op)
 		case OP_BR:
 			pc_offset := vm.signExtend(op&0x1FF, 9)
 			cond := (op >> 9) & 0x7
@@ -105,7 +107,7 @@ func (vm *Vm) Run() {
 			r0 := (op >> 9) & 0x7
 			pc_offset := vm.signExtend(op&0x1FF, 9)
 
-			vm.register.general[r0] = vm.memory[vm.register.pc+pc_offset]
+			vm.register.general[r0] = vm.memRead(vm.memRead(vm.register.pc + pc_offset))
 			vm.updateFlag(r0)
 		case OP_AND:
 			r0 := (op >> 9) & 0x7
@@ -145,14 +147,14 @@ func (vm *Vm) Run() {
 			r0 := (op >> 9) & 0x7
 			pc_offset := vm.signExtend(op&0x1FF, 9)
 
-			vm.register.general[r0] = vm.memory[vm.register.pc+pc_offset]
+			vm.register.general[r0] = vm.memRead(vm.register.pc + pc_offset)
 			vm.updateFlag(r0)
 		case OP_LDR:
 			r0 := (op >> 9) & 0x7
 			r1 := (op >> 6) & 0x7
 			offset := vm.signExtend(op&0x3F, 6)
 
-			vm.register.general[r0] = vm.memory[vm.register.general[r1]+offset]
+			vm.register.general[r0] = vm.memRead(vm.register.general[r1] + offset)
 			vm.updateFlag(r0)
 		case OP_LEA:
 			r0 := (op >> 9) & 0x7
@@ -164,18 +166,18 @@ func (vm *Vm) Run() {
 			r0 := (op >> 9) & 0x7
 			pc_offset := vm.signExtend(op&0x1FF, 9)
 
-			vm.memory[vm.register.pc+pc_offset] = vm.register.general[r0]
+			vm.memWrite(vm.register.pc+pc_offset, vm.register.general[r0])
 		case OP_STI:
 			r0 := (op >> 9) & 0x7
 			pc_offset := vm.signExtend(op&0x1FF, 9)
 
-			vm.memory[vm.memory[vm.register.pc+pc_offset]] = vm.register.general[r0]
+			vm.memWrite(vm.memRead(vm.register.pc+pc_offset), vm.register.general[r0])
 		case OP_STR:
 			r0 := (op >> 9) & 0x7
 			r1 := (op >> 6) & 0x7
 			offset := vm.signExtend(op&0x3F, 6)
 
-			vm.memory[vm.register.general[r1]+offset] = vm.register.general[r0]
+			vm.memWrite(vm.register.general[r1]+offset, vm.register.general[r0])
 		}
 	}
 }
